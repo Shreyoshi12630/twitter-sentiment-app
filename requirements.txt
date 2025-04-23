@@ -1,0 +1,9 @@
+pandas
+numpy
+nltk
+scikit-learn
+matplotlib
+seaborn
+wordcloud
+tensorflow
+streamlit
