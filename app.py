@@ -1,107 +1,102 @@
-
 import streamlit as st
-import pandas as pd
 import numpy as np
 import re
 import nltk
-import matplotlib.pyplot as plt
-import seaborn as sns
 from nltk.corpus import stopwords
-from wordcloud import WordCloud
-from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import LabelEncoder
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Dropout, BatchNormalization, Activation
-from tensorflow.keras.callbacks import EarlyStopping
-from tensorflow.keras.regularizers import l2
-from tensorflow.keras.utils import to_categorical
+from tensorflow.keras.models import load_model
+import pickle
 
-# Download stopwords
 nltk.download('stopwords')
 stop_words = set(stopwords.words('english'))
 
-st.title("Twitter Sentiment Analysis with ANN")
-uploaded_file = st.file_uploader("Upload the Tweets CSV file", type=["csv"])
+# ========== PAGE CONFIG ==========
+st.set_page_config(page_title="💬 Tweet Sentiment Predictor", layout="centered")
 
-if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
-    df.dropna(subset=['text', 'sentiment'], inplace=True)
+# ========== CSS STYLE ==========
+st.markdown("""
+    <style>
+    body {
+        background-color: #FAF9F6;
+        color: #222831;
+        font-family: 'Segoe UI', sans-serif;
+    }
+    .stApp {
+        max-width: 700px;
+        margin: auto;
+    }
+    .title {
+        font-size: 2.5rem;
+        text-align: center;
+        color: #6C4AB6;
+        font-weight: bold;
+        margin-top: 1rem;
+    }
+    .subtitle {
+        font-size: 1.3rem;
+        text-align: center;
+        color: #FF6B35;
+        margin-bottom: 2rem;
+    }
+    .stTextInput > div > div > input, .stTextArea textarea {
+        background-color: #ffffff;
+        color: #000000;
+        border: 2px solid #6C4AB6;
+        border-radius: 10px;
+        padding: 10px;
+    }
+    .stButton > button {
+        background-color: #6C4AB6;
+        color: white;
+        font-weight: bold;
+        border-radius: 10px;
+        padding: 10px 20px;
+        font-size: 16px;
+        margin-top: 10px;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
-    def clean_text(text):
-        text = str(text).lower()
-        text = re.sub(r"http\S+|www\S+|https\S+", '', text)
-        text = re.sub(r'\@\w+|\#','', text)
-        text = re.sub(r'\W', ' ', text)
-        text = re.sub(r'\s+', ' ', text).strip()
-        return text
+# ========== TITLES ==========
+st.markdown("<div class='title'>🧠 Try Predicting a Tweet Sentiment</div>", unsafe_allow_html=True)
+st.markdown("<div class='subtitle'>💬 Enter a tweet and get its Predicted Sentiment!</div>", unsafe_allow_html=True)
 
-    df['clean_text'] = df['text'].apply(clean_text)
+# ========== LOAD TRAINED COMPONENTS ==========
+model = load_model("model.h5")
+with open("vectorizer.pkl", "rb") as f:
+    vectorizer = pickle.load(f)
+with open("encoder.pkl", "rb") as f:
+    encoder = pickle.load(f)
 
-    encoder = LabelEncoder()
-    df['label'] = encoder.fit_transform(df['sentiment'])
+# ========== CLEAN FUNCTION ==========
+def clean_text(text):
+    text = str(text).lower()
+    text = re.sub(r"http\S+|www\S+|https\S+", '', text)
+    text = re.sub(r'\@\w+|\#','', text)
+    text = re.sub(r'\W', ' ', text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
 
-    st.subheader("Sentiment Distribution")
-    fig1, ax1 = plt.subplots()
-    sns.countplot(x='sentiment', data=df, ax=ax1)
-    st.pyplot(fig1)
+# ========== PREDICT FUNCTION ==========
+def predict_sentiment(tweet):
+    cleaned = clean_text(tweet)
+    vect = vectorizer.transform([cleaned]).toarray()
+    pred = model.predict(vect)[0]
+    return encoder.inverse_transform([np.argmax(pred)])[0]
 
-    st.subheader("WordClouds for Each Sentiment")
-    for sentiment in df['sentiment'].unique():
-        subset = df[df['sentiment'] == sentiment]
-        text = " ".join(subset['clean_text'].tolist())
-        wordcloud = WordCloud(stopwords=stop_words).generate(text)
-        fig2, ax2 = plt.subplots()
-        ax2.imshow(wordcloud, interpolation='bilinear')
-        ax2.axis("off")
-        st.pyplot(fig2)
+# ========== INPUT ==========
+tweet_input = st.text_area("📝 Write your tweet here...", height=150)
 
-    vectorizer = TfidfVectorizer(max_features=2000)
-    X = vectorizer.fit_transform(df['clean_text']).toarray()
-    y = to_categorical(df['label'], num_classes=3)
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-    model = Sequential()
-    model.add(Dense(128, input_dim=2000, kernel_regularizer=l2(0.001)))
-    model.add(BatchNormalization())
-    model.add(Activation('relu'))
-    model.add(Dropout(0.5))
-    model.add(Dense(64, kernel_regularizer=l2(0.001)))
-    model.add(BatchNormalization())
-    model.add(Activation('relu'))
-    model.add(Dropout(0.3))
-    model.add(Dense(3, activation='softmax'))
-    model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
-
-    early_stop = EarlyStopping(monitor='val_loss', patience=3, restore_best_weights=True)
-    history = model.fit(X_train, y_train, epochs=20, batch_size=128, validation_split=0.2, callbacks=[early_stop], verbose=1)
-
-    loss, accuracy = model.evaluate(X_test, y_test)
-    st.success(f"Model Test Accuracy: {accuracy:.4f}")
-
-    st.subheader("Model Accuracy & Loss")
-    fig3, ax3 = plt.subplots()
-    ax3.plot(history.history['accuracy'], label='Train Accuracy')
-    ax3.plot(history.history['val_accuracy'], label='Validation Accuracy')
-    ax3.set_title("Accuracy")
-    ax3.legend()
-    st.pyplot(fig3)
-
-    fig4, ax4 = plt.subplots()
-    ax4.plot(history.history['loss'], label='Train Loss')
-    ax4.plot(history.history['val_loss'], label='Validation Loss')
-    ax4.set_title("Loss")
-    ax4.legend()
-    st.pyplot(fig4)
-
-    def predict_sentiment_nn(tweet):
-        cleaned = clean_text(tweet)
-        vect = vectorizer.transform([cleaned]).toarray()
-        pred = model.predict(vect)[0]
-        return encoder.inverse_transform([np.argmax(pred)])[0]
-
-    st.subheader("Try Predicting a Tweet Sentiment")
-    user_input = st.text_area("Enter a tweet:")
-    if user_input:
-        prediction = predict_sentiment_nn(user_input)
-        st.info(f"Predicted Sentiment: {prediction}")
+if st.button("🔍 Predict Sentiment"):
+    if tweet_input.strip() == "":
+        st.warning("⚠️ Please enter a tweet first!")
+    else:
+        sentiment = predict_sentiment(tweet_input)
+        emoji_map = {
+            "positive": "😊💖",
+            "negative": "😞💔",
+            "neutral": "😐🌀"
+        }
+        emoji = emoji_map.get(sentiment.lower(), "🔍")
+        st.success(f"{emoji} **Predicted Sentiment:** `{sentiment.upper()}`")
